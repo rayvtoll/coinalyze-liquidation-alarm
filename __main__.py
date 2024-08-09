@@ -28,7 +28,7 @@ def play_sound() -> None:
     duration = 0.05  # Duration in seconds
     sample_rate = 44100  # Sample rate in Hz
     waveform = np.sin(
-        *np.pi
+        np.pi
         * 880  # Frequency in Hz (A5 note)
         * np.linspace(0, duration, int(duration * sample_rate), endpoint=False)
     )
