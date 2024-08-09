@@ -77,8 +77,8 @@ class LiquidationScanner:
             if liquidation_tuple not in self.liquidations:
                 print(
                     "Liquidation detected:"
-                    + f"\t{direction}\t$"
-                    + str(liquidation_amount)
+                    + f"\t{direction}\t"
+                    + f'${liquidation_amount:>9}.-'
                     + f"\t at {datetime.fromtimestamp(l_time)}"
                 )
                 play_sound()
