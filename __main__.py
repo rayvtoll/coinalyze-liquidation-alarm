@@ -78,7 +78,7 @@ class LiquidationScanner:
                 )
                 play_sound(
                     title=f"{l_time}-{direction}-{liquidation_amount}",
-                    text=f"Liquidation detected. direction: {direction}, amount: {liquidation_amount}",
+                    text=f"{liquidation_amount} {direction} liquidation detected",
                 )
                 self.liquidations.add(liquidation_tuple)
 
