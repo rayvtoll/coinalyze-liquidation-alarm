@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decouple import config
-import numpy as np
+from gtts import gTTS
+import pygame
 import requests
-import sounddevice as sd
 import sys
 from time import sleep
 
@@ -16,28 +16,23 @@ SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=2, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
 
 
+pygame.mixer.init()
+
+
 def print_there(x, y, text) -> None:
     """Print text at the bottom on the terminal"""
     sys.stdout.write("\x1b7\x1b[%d;%df%s\x1b8" % (x, y, text))
     sys.stdout.flush()
 
 
-def play_sound() -> None:
-    """Play a sound"""
-    # Parameters for the sine wave
-    duration = 0.05  # Duration in seconds
-    sample_rate = 44100  # Sample rate in Hz
-    waveform = np.sin(
-        np.pi
-        * 880  # Frequency in Hz (A5 note)
-        * np.linspace(0, duration, int(duration * sample_rate), endpoint=False)
-    )
+def play_sound(title: str, text: str) -> None:
+    # save the text to an mp3 file
+    tts = gTTS(text=text, lang="en", slow=False)
+    tts.save(f"/tmp/{title}.mp3")
 
-    # Play the sine wave
-    sd.play(waveform, sample_rate)
-    sleep(1)
-    sd.stop()
-    sd.wait()
+    # play the mp3 file
+    pygame.mixer.music.load(f"/tmp/{title}.mp3")
+    pygame.mixer.music.play()
 
 
 @dataclass
@@ -68,7 +63,7 @@ class LiquidationScanner:
 
         def _handle_liquidation(liquidation_amount: int, direction: str):
             """Internal function to handle the liquidation
-            
+
             Args:
                 liquidation_amount (int): amount of the liquidation
                 direction (str): direction of the liquidation
@@ -78,10 +73,13 @@ class LiquidationScanner:
                 print(
                     "Liquidation detected:"
                     + f"\t{direction}\t"
-                    + f'${liquidation_amount:>9}.-'
+                    + f"${liquidation_amount:>9}.-"
                     + f"\t at {datetime.fromtimestamp(l_time)}"
                 )
-                play_sound()
+                play_sound(
+                    title=f"{l_time}-{direction}-{liquidation_amount}",
+                    text=f"Liquidation detected. direction: {direction}, amount: {liquidation_amount}",
+                )
                 self.liquidations.add(liquidation_tuple)
 
         l_time, l_long, l_short = (

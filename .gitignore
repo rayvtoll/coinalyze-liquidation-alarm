@@ -36,3 +36,6 @@ bandit_report.json
 coverage.*
 .scannerwork
 .scannerwork/*
+
+# mp3
+*.mp3
