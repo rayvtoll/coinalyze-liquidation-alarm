@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import os
 from decouple import config
 from gtts import gTTS
 import pygame
@@ -14,29 +15,48 @@ N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
 MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
 SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=2, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
+TMP_MP3_DIR = config("SPEECH_MP3_DIR", default="/tmp")
 
 
 pygame.mixer.init()
 
 
-def print_there(x, y, text) -> None:
+def print_there(x: int, y: int, text: str) -> None:
     """Print text at the bottom on the terminal"""
     sys.stdout.write("\x1b7\x1b[%d;%df%s\x1b8" % (x, y, text))
     sys.stdout.flush()
 
 
-def play_sound(title: str, text: str) -> None:
-    # save the text to an mp3 file
+def convert_speech_to_text(title: str, text: str) -> None:
+    """Convert text to speech and play the speech
+
+    Args:
+        title (str): title of the speech for the temporary mp3 file
+        text (str): text to convert to speech
+    """
+    # save speech to an mp3 file
     tts = gTTS(text=text, lang="en", slow=False)
-    tts.save(f"/tmp/{title}.mp3")
+    tts.save(f"{TMP_MP3_DIR}/{title}.mp3")
 
     # play the mp3 file
     pygame.mixer.music.load(f"/tmp/{title}.mp3")
     pygame.mixer.music.play()
 
+    # wait for the mp3 to finish
+    while pygame.mixer.music.get_busy():
+        sleep(1)
+
+    # unload the mp3 file
+    pygame.mixer.music.unload()
+
+    # remove the mp3 file
+    os.remove(f"{TMP_MP3_DIR}/{title}.mp3")
+
 
 @dataclass
 class LiquidationScanner:
+    """Scans coinalyze to notify liquidations through text to speech"""
+
     liquidations: set
 
     @property
@@ -76,7 +96,7 @@ class LiquidationScanner:
                     + f"${liquidation_amount:>9}.-"
                     + f"\t at {datetime.fromtimestamp(l_time)}"
                 )
-                play_sound(
+                convert_speech_to_text(
                     title=f"{l_time}-{direction}-{liquidation_amount}",
                     text=f"{liquidation_amount} {direction} liquidation detected",
                 )
