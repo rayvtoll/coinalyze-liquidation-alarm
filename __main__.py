@@ -20,6 +20,9 @@ OPEN_INTEREST_URL = config(
 N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
 MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
 MINIMAL_OPEN_INTEREST = config("MINIMAL_OPEN_INTEREST", default=1_000_000, cast=int)
+ROUNDED_DIFFERENCE_OPEN_INTEREST = config(
+    "ROUNDED_DIFFERENCE_OPEN_INTEREST", default=-6, cast=int
+)
 SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=2, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
 TMP_MP3_DIR = config("SPEECH_MP3_DIR", default="/tmp")
@@ -95,7 +98,8 @@ class CoinalyzeScanner:
             history.get("l"),
         )
         difference = abs(int(candle_high) - int(candle_low))
-        open_interest_tuple = (candle_time, difference)
+        rounded_difference = round(difference, ROUNDED_DIFFERENCE_OPEN_INTEREST)
+        open_interest_tuple = (candle_time, rounded_difference)
         if (
             difference >= MINIMAL_OPEN_INTEREST
             and open_interest_tuple not in self.scanned_data
@@ -169,7 +173,7 @@ class CoinalyzeScanner:
 
 
 def main() -> None:
-    print("Starting the liquidation detector")
+    print("Starting the Coinalyze scanner")
 
     scanner = CoinalyzeScanner(set())
 
