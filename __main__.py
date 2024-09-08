@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import os
+from typing import List
 from decouple import config
 from gtts import gTTS
 import pygame
@@ -10,9 +11,15 @@ from time import sleep
 
 
 SECRET_API_KEY = config("SECRET_API_KEY")
-URL = config("URL", default="https://api.coinalyze.net/v1/liquidation-history")
+LIQUIDATION_URL = config(
+    "LIQUIDATION_URL", default="https://api.coinalyze.net/v1/liquidation-history"
+)
+OPEN_INTEREST_URL = config(
+    "OPEN_INTEREST_URL", default="https://api.coinalyze.net/v1/open-interest-history"
+)
 N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
 MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
+MINIMAL_OPEN_INTEREST = config("MINIMAL_OPEN_INTEREST", default=1_000_000, cast=int)
 SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=2, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
 TMP_MP3_DIR = config("SPEECH_MP3_DIR", default="/tmp")
@@ -54,10 +61,11 @@ def convert_speech_to_text(title: str, text: str) -> None:
 
 
 @dataclass
-class LiquidationScanner:
-    """Scans coinalyze to notify liquidations through text to speech"""
+class CoinalyzeScanner:
+    """Scans coinalyze to notify for changes in open interest and liquidations through
+    text to speech"""
 
-    liquidations: set
+    scanned_data: set
 
     @property
     def params(self) -> dict:
@@ -73,11 +81,41 @@ class LiquidationScanner:
             "interval": INTERVAL,
         }
 
+    def handle_open_interest(self, history: dict) -> None:
+        """Handle the open interest fluctuations
+
+        Args:
+            history (dict): history of the open interest
+        """
+
+        candle_time, candle_open, candle_high, candle_low = (
+            history.get("t"),
+            history.get("o"),
+            history.get("h"),
+            history.get("l"),
+        )
+        difference = abs(int(candle_high) - int(candle_low))
+        open_interest_tuple = (candle_time, difference)
+        if (
+            difference >= MINIMAL_OPEN_INTEREST
+            and open_interest_tuple not in self.scanned_data
+        ):
+            print(
+                "Open interest changed:"
+                + "\t\t"
+                + f"${difference:>9}.-"
+                + f"\t at {datetime.fromtimestamp(candle_time)}"
+            )
+            convert_speech_to_text(
+                title=f"{candle_time}-{candle_open}-{difference}",
+                text=f"Open interest changed by {difference}",
+            )
+            self.scanned_data.add(open_interest_tuple)
+
     def handle_liquidation_set(self, history: dict) -> None:
         """Handle the liquidation set and check for liquidations
 
         Args:
-            liquidations (set): set of liquidations
             history (dict): history of the liquidation
         """
 
@@ -89,7 +127,7 @@ class LiquidationScanner:
                 direction (str): direction of the liquidation
             """
             liquidation_tuple = l_time, direction, liquidation_amount
-            if liquidation_tuple not in self.liquidations:
+            if liquidation_tuple not in self.scanned_data:
                 print(
                     "Liquidation detected:"
                     + f"\t{direction}\t"
@@ -100,7 +138,7 @@ class LiquidationScanner:
                     title=f"{l_time}-{direction}-{liquidation_amount}",
                     text=f"{liquidation_amount} {direction} liquidation detected",
                 )
-                self.liquidations.add(liquidation_tuple)
+                self.scanned_data.add(liquidation_tuple)
 
         l_time, l_long, l_short = (
             history.get("t"),
@@ -112,7 +150,7 @@ class LiquidationScanner:
         if l_short > MINIMAL_LIQUIDATION:
             _handle_liquidation(l_short, "short")
 
-    def handle_url(self, url: str) -> None:
+    def handle_url(self, url: str) -> List[dict]:
         """Handle the url and check for liquidations
 
         Args:
@@ -125,17 +163,15 @@ class LiquidationScanner:
         response_json = response.json()
 
         if not len(response_json):
-            return
+            return []
 
-        all_history = response_json[0].get("history", [])
-        for history in all_history:
-            self.handle_liquidation_set(history)
+        return response_json[0].get("history", [])
 
 
 def main() -> None:
     print("Starting the liquidation detector")
 
-    liquidation_scanner = LiquidationScanner(set())
+    scanner = CoinalyzeScanner(set())
 
     while True:
 
@@ -143,7 +179,14 @@ def main() -> None:
         print_there(100, 0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
         # check for liquidations
-        liquidation_scanner.handle_url(URL)
+        for history in scanner.handle_url(LIQUIDATION_URL):
+            scanner.handle_liquidation_set(history)
+
+        # sleep for preferred interval
+        sleep(SLEEP_INTERVAL)
+
+        for history in scanner.handle_url(OPEN_INTEREST_URL):
+            scanner.handle_open_interest(history)
 
         # sleep for preferred interval
         sleep(SLEEP_INTERVAL)
