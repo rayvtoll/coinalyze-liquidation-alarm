@@ -19,7 +19,7 @@ OPEN_INTEREST_URL = config(
 )
 N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
 MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
-MINIMAL_OPEN_INTEREST = config("MINIMAL_OPEN_INTEREST", default=1_000_000, cast=int)
+MINIMAL_OPEN_INTEREST = config("MINIMAL_OPEN_INTEREST", default=10_000_000, cast=int)
 ROUNDED_DIFFERENCE_OPEN_INTEREST = config(
     "ROUNDED_DIFFERENCE_OPEN_INTEREST", default=-6, cast=int
 )
@@ -50,6 +50,7 @@ def convert_speech_to_text(title: str, text: str) -> None:
 
     # play the mp3 file
     pygame.mixer.music.load(f"/tmp/{title}.mp3")
+    pygame.mixer.music.set_volume(0.5)
     pygame.mixer.music.play()
 
     # wait for the mp3 to finish
@@ -112,7 +113,7 @@ class CoinalyzeScanner:
             )
             convert_speech_to_text(
                 title=f"{candle_time}-{candle_open}-{difference}",
-                text=f"Open interest changed by {difference}",
+                text=f"Change in open interest with value {difference} detected",
             )
             self.scanned_data.add(open_interest_tuple)
 
@@ -140,7 +141,7 @@ class CoinalyzeScanner:
                 )
                 convert_speech_to_text(
                     title=f"{l_time}-{direction}-{liquidation_amount}",
-                    text=f"{liquidation_amount} {direction} liquidation detected",
+                    text=f"{direction} liquidation with value {liquidation_amount} detected",
                 )
                 self.scanned_data.add(liquidation_tuple)
 
