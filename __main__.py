@@ -155,17 +155,23 @@ class CoinalyzeScanner:
         if l_short > MINIMAL_LIQUIDATION:
             _handle_liquidation(l_short, "short")
 
-    def handle_url(self, url: str) -> List[dict]:
+    def handle_url(self, url: str, include_params: bool = True) -> List[dict]:
         """Handle the url and check for liquidations
 
         Args:
             url (str): url to check for liquidations
         """
-        response = requests.get(
-            url, headers={"api_key": SECRET_API_KEY}, params=self.params
-        )
-        response.raise_for_status()
-        response_json = response.json()
+        try:
+            response = requests.get(
+                url,
+                headers={"api_key": SECRET_API_KEY},
+                params=self.params if include_params else {},
+            )
+            response.raise_for_status()
+            response_json = response.json()
+        except Exception as e:
+            print(str(e))
+            return []
 
         if not len(response_json):
             return []
