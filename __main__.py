@@ -1,13 +1,13 @@
-from dataclasses import dataclass
 from datetime import datetime, timedelta
-import os
-from typing import List
 from decouple import config
+from functools import cached_property
 from gtts import gTTS
+import os
 import pygame
 import requests
 import sys
 from time import sleep
+from typing import List
 
 
 SECRET_API_KEY = config("SECRET_API_KEY")
@@ -16,6 +16,9 @@ LIQUIDATION_URL = config(
 )
 OPEN_INTEREST_URL = config(
     "OPEN_INTEREST_URL", default="https://api.coinalyze.net/v1/open-interest-history"
+)
+FUTURE_MARKETS_URL = config(
+    "FUTURES_MARKETS_URL", default="https://api.coinalyze.net/v1/future-markets"
 )
 N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
 MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
@@ -64,18 +67,18 @@ def convert_speech_to_text(title: str, text: str) -> None:
     os.remove(f"{TMP_MP3_DIR}/{title}.mp3")
 
 
-@dataclass
 class CoinalyzeScanner:
     """Scans coinalyze to notify for changes in open interest and liquidations through
     text to speech"""
 
-    scanned_data: set
+    def __init__(self):
+        self.scanned_data = set()
 
     @property
     def params(self) -> dict:
         """Returns the parameters for the request to the API"""
         return {
-            "symbols": "BTCUSD.6",
+            "symbols": self.symbols,
             "from": int(
                 datetime.timestamp(
                     datetime.now() - timedelta(minutes=N_MINUTES_TIMEDELTA)
@@ -84,6 +87,15 @@ class CoinalyzeScanner:
             "to": int(datetime.timestamp(datetime.now())),
             "interval": INTERVAL,
         }
+
+    @cached_property
+    def symbols(self) -> str:
+        """Returns the symbols for the request to the API"""
+        symbols = []
+        for market in self.handle_url(FUTURE_MARKETS_URL, False):
+            if (symbol := market.get("symbol", "").upper()).startswith("BTC"): 
+                symbols.append(symbol)
+        return ",".join(symbols)
 
     def handle_open_interest(self, history: dict) -> None:
         """Handle the open interest fluctuations
@@ -155,28 +167,36 @@ class CoinalyzeScanner:
         if l_short > MINIMAL_LIQUIDATION:
             _handle_liquidation(l_short, "short")
 
-    def handle_url(self, url: str) -> List[dict]:
+    def handle_url(self, url: str, include_params: bool = True) -> List[dict]:
         """Handle the url and check for liquidations
 
         Args:
             url (str): url to check for liquidations
         """
-        response = requests.get(
-            url, headers={"api_key": SECRET_API_KEY}, params=self.params
-        )
-        response.raise_for_status()
-        response_json = response.json()
+        try:
+            response = requests.get(
+                url,
+                headers={"api_key": SECRET_API_KEY},
+                params=self.params if include_params else {},
+            )
+            response.raise_for_status()
+            response_json = response.json()
+        # except Exception:
+        except Exception as e:
+            print(str(e))
+            return []
 
         if not len(response_json):
             return []
 
+        # TODO: return response_json
         return response_json[0].get("history", [])
 
 
 def main() -> None:
     print("Starting the Coinalyze scanner")
 
-    scanner = CoinalyzeScanner(set())
+    scanner = CoinalyzeScanner()
 
     while True:
 
@@ -184,6 +204,7 @@ def main() -> None:
         print_there(100, 0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
         # check for liquidations
+        # TODO: remove loop and look into list
         for history in scanner.handle_url(LIQUIDATION_URL):
             scanner.handle_liquidation_set(history)
 
