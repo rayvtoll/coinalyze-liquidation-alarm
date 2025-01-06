@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta
+import discord
+import os
+from typing import List
 from decouple import config
 from functools import cached_property
 from gtts import gTTS
@@ -9,12 +12,15 @@ import sys
 from time import sleep
 from typing import List
 
+ENABLE_DISCORD = config("ENABLE_DISCORD", default=False, cast=bool)
+DISCORD_CHANNEL = config("PANEL_CHANNEL_ID", cast=int, default=0)
+DISCORD_PRIVATE_KEY = config("TOKEN", default="")
 
-SECRET_API_KEY = config("SECRET_API_KEY")
-LIQUIDATION_URL = config(
+COINALYZE_SECRET_API_KEY = config("SECRET_API_KEY")
+COINALYZE_LIQUIDATION_URL = config(
     "LIQUIDATION_URL", default="https://api.coinalyze.net/v1/liquidation-history"
 )
-OPEN_INTEREST_URL = config(
+COINALYZE_OPEN_INTEREST_URL = config(
     "OPEN_INTEREST_URL", default="https://api.coinalyze.net/v1/open-interest-history"
 )
 FUTURE_MARKETS_URL = config(
@@ -38,6 +44,26 @@ def print_there(x: int, y: int, text: str) -> None:
     """Print text at the bottom on the terminal"""
     sys.stdout.write("\x1b7\x1b[%d;%df%s\x1b8" % (x, y, text))
     sys.stdout.flush()
+
+
+def post_to_discord(message: str) -> None:
+    """Post a message to discord
+
+    Args:
+        message (str): message to post to discord
+    """
+    # setup discord
+    intents = discord.Intents.default()
+    intents.messages = True
+    client = discord.Client(intents=intents)
+
+    @client.event
+    async def on_ready():
+        channel = client.get_channel(DISCORD_CHANNEL)
+        await channel.send(f"@everyone {message}")
+        await client.close()
+
+    client.run(token=DISCORD_PRIVATE_KEY)
 
 
 def convert_speech_to_text(title: str, text: str) -> None:
@@ -123,9 +149,14 @@ class CoinalyzeScanner:
                 + f"${difference:>9}.-"
                 + f"\t at {datetime.fromtimestamp(candle_time)}"
             )
+            open_interest_message = (
+                f"Change in open interest with value ${difference:,}- detected"
+            )
+            if ENABLE_DISCORD:
+                post_to_discord(open_interest_message)
             convert_speech_to_text(
                 title=f"{candle_time}-{candle_open}-{difference}",
-                text=f"Change in open interest with value {difference} detected",
+                text=open_interest_message,
             )
             self.scanned_data.add(open_interest_tuple)
 
@@ -151,9 +182,12 @@ class CoinalyzeScanner:
                     + f"${liquidation_amount:>9}.-"
                     + f"\t at {datetime.fromtimestamp(l_time)}"
                 )
+                liquidation_message = f"{direction} liquidation with value ${liquidation_amount:,}- detected"
+                if ENABLE_DISCORD:
+                    post_to_discord(liquidation_message)
                 convert_speech_to_text(
                     title=f"{l_time}-{direction}-{liquidation_amount}",
-                    text=f"{direction} liquidation with value {liquidation_amount} detected",
+                    text=liquidation_message,
                 )
                 self.scanned_data.add(liquidation_tuple)
 
@@ -176,7 +210,7 @@ class CoinalyzeScanner:
         try:
             response = requests.get(
                 url,
-                headers={"api_key": SECRET_API_KEY},
+                headers={"api_key": COINALYZE_SECRET_API_KEY},
                 params=self.params if include_params else {},
             )
             response.raise_for_status()
@@ -203,15 +237,14 @@ def main() -> None:
         # print the current time at the bottom of the terminal
         print_there(100, 0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-        # check for liquidations
         # TODO: remove loop and look into list
-        for history in scanner.handle_url(LIQUIDATION_URL):
+        for history in scanner.handle_url(COINALYZE_LIQUIDATION_URL):
             scanner.handle_liquidation_set(history)
 
         # sleep for preferred interval
         sleep(SLEEP_INTERVAL)
 
-        for history in scanner.handle_url(OPEN_INTEREST_URL):
+        for history in scanner.handle_url(COINALYZE_OPEN_INTEREST_URL):
             scanner.handle_open_interest(history)
 
         # sleep for preferred interval
