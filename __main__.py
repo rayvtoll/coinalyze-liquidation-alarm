@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 import discord
 import os
@@ -11,6 +12,7 @@ import requests
 import sys
 from time import sleep
 from typing import List
+
 
 ENABLE_DISCORD = config("ENABLE_DISCORD", default=False, cast=bool)
 DISCORD_CHANNEL = config("PANEL_CHANNEL_ID", cast=int, default=0)
@@ -32,7 +34,7 @@ MINIMAL_OPEN_INTEREST = config("MINIMAL_OPEN_INTEREST", default=10_000_000, cast
 ROUNDED_DIFFERENCE_OPEN_INTEREST = config(
     "ROUNDED_DIFFERENCE_OPEN_INTEREST", default=-6, cast=int
 )
-SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=2, cast=int)
+SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=60, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
 TMP_MP3_DIR = config("SPEECH_MP3_DIR", default="/tmp")
 
@@ -118,49 +120,50 @@ class CoinalyzeScanner:
     def symbols(self) -> str:
         """Returns the symbols for the request to the API"""
         symbols = []
-        for market in self.handle_url(FUTURE_MARKETS_URL, False):
-            if (symbol := market.get("symbol", "").upper()).startswith("BTC"): 
+        for market in self.handle_url(FUTURE_MARKETS_URL, False, True):
+            if (symbol := market.get("symbol", "").upper()).startswith("BTCUSD"):
                 symbols.append(symbol)
-        return ",".join(symbols)
+        print(f"Lenght of symbols: {len(symbols)}")
+        return ",".join(symbols[:20])
 
-    def handle_open_interest(self, history: dict) -> None:
-        """Handle the open interest fluctuations
+    # def handle_open_interest(self, history: dict) -> None:
+    #     """Handle the open interest fluctuations
 
-        Args:
-            history (dict): history of the open interest
-        """
+    #     Args:
+    #         history (dict): history of the open interest
+    #     """
 
-        candle_time, candle_open, candle_high, candle_low = (
-            history.get("t"),
-            history.get("o"),
-            history.get("h"),
-            history.get("l"),
-        )
-        difference = abs(int(candle_high) - int(candle_low))
-        rounded_difference = round(difference, ROUNDED_DIFFERENCE_OPEN_INTEREST)
-        open_interest_tuple = (candle_time, rounded_difference)
-        if (
-            difference >= MINIMAL_OPEN_INTEREST
-            and open_interest_tuple not in self.scanned_data
-        ):
-            print(
-                "Open interest changed:"
-                + "\t\t"
-                + f"${difference:>9}.-"
-                + f"\t at {datetime.fromtimestamp(candle_time)}"
-            )
-            open_interest_message = (
-                f"Change in open interest with value ${difference:,}- detected"
-            )
-            if ENABLE_DISCORD:
-                post_to_discord(open_interest_message)
-            convert_speech_to_text(
-                title=f"{candle_time}-{candle_open}-{difference}",
-                text=open_interest_message,
-            )
-            self.scanned_data.add(open_interest_tuple)
+    #     candle_time, candle_open, candle_high, candle_low = (
+    #         history.get("t"),
+    #         history.get("o"),
+    #         history.get("h"),
+    #         history.get("l"),
+    #     )
+    #     difference = abs(int(candle_high) - int(candle_low))
+    #     rounded_difference = round(difference, ROUNDED_DIFFERENCE_OPEN_INTEREST)
+    #     open_interest_tuple = (candle_time, rounded_difference)
+    #     if (
+    #         difference >= MINIMAL_OPEN_INTEREST
+    #         and open_interest_tuple not in self.scanned_data
+    #     ):
+    #         print(
+    #             "Open interest changed:"
+    #             + "\t\t"
+    #             + f"${difference:>9}.-"
+    #             + f"\t at {datetime.fromtimestamp(candle_time)}"
+    #         )
+    #         open_interest_message = (
+    #             f"Change in open interest with value ${difference:,}- detected"
+    #         )
+    #         if ENABLE_DISCORD:
+    #             post_to_discord(open_interest_message)
+    #         convert_speech_to_text(
+    #             title=f"{candle_time}-{candle_open}-{difference}",
+    #             text=open_interest_message,
+    #         )
+    #         self.scanned_data.add(open_interest_tuple)
 
-    def handle_liquidation_set(self, history: dict) -> None:
+    def handle_liquidation_set(self, symbols: list) -> None:
         """Handle the liquidation set and check for liquidations
 
         Args:
@@ -191,17 +194,19 @@ class CoinalyzeScanner:
                 )
                 self.scanned_data.add(liquidation_tuple)
 
-        l_time, l_long, l_short = (
-            history.get("t"),
-            history.get("l"),
-            history.get("s"),
-        )
-        if l_long > MINIMAL_LIQUIDATION:
-            _handle_liquidation(l_long, "long")
-        if l_short > MINIMAL_LIQUIDATION:
-            _handle_liquidation(l_short, "short")
+        total_long, total_short = 0, 0
+        l_time = symbols[0].get("t") if len(symbols) else 0
+        for history in symbols:
+            total_long += round(history.get("l"), 0)
+            total_short += round(history.get("s"), 0)
+        if total_long > MINIMAL_LIQUIDATION:
+            _handle_liquidation(total_long, "long")
+        if total_short > MINIMAL_LIQUIDATION:
+            _handle_liquidation(total_short, "short")
 
-    def handle_url(self, url: str, include_params: bool = True) -> List[dict]:
+    def handle_url(
+        self, url: str, include_params: bool = True, symbols: bool = False
+    ) -> List[dict]:
         """Handle the url and check for liquidations
 
         Args:
@@ -223,8 +228,14 @@ class CoinalyzeScanner:
         if not len(response_json):
             return []
 
-        # TODO: return response_json
-        return response_json[0].get("history", [])
+        if symbols:
+            return response_json
+
+        return [
+            symbol.get("history")[0]
+            for symbol in response_json
+            if symbol.get("history")
+        ]
 
 
 def main() -> None:
@@ -237,15 +248,13 @@ def main() -> None:
         # print the current time at the bottom of the terminal
         print_there(100, 0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-        # TODO: remove loop and look into list
-        for history in scanner.handle_url(COINALYZE_LIQUIDATION_URL):
-            scanner.handle_liquidation_set(history)
+        scanner.handle_liquidation_set(scanner.handle_url(COINALYZE_LIQUIDATION_URL))
 
         # sleep for preferred interval
-        sleep(SLEEP_INTERVAL)
+        # sleep(SLEEP_INTERVAL)
 
-        for history in scanner.handle_url(COINALYZE_OPEN_INTEREST_URL):
-            scanner.handle_open_interest(history)
+        # for history in scanner.handle_url(COINALYZE_OPEN_INTEREST_URL):
+        #     scanner.handle_open_interest(history)
 
         # sleep for preferred interval
         sleep(SLEEP_INTERVAL)
