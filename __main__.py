@@ -171,12 +171,11 @@ class CoinalyzeScanner:
         try:
             response = requests.get(
                 url,
-                headers={"api_key": COINALYZE_SECRET_API_KEY},
+                headers={"api_key": SECRET_API_KEY},
                 params=self.params if include_params else {},
             )
             response.raise_for_status()
             response_json = response.json()
-        # except Exception:
         except Exception as e:
             print(str(e))
             return []
