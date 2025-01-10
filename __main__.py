@@ -1,3 +1,4 @@
+from cm_text import TextClient
 from datetime import datetime, timedelta
 import discord
 import os
@@ -13,11 +14,25 @@ from time import sleep
 from typing import List
 
 
+# discord
 ENABLE_DISCORD = config("ENABLE_DISCORD", default=False, cast=bool)
-DISCORD_CHANNEL_ID = config("DISCORD_CHANNEL_ID", cast=int, default=0)
-DISCORD_PRIVATE_KEY = config("DISCORD_PRIVATE_KEY", default="")
+if ENABLE_DISCORD:
+    DISCORD_CHANNEL_ID = config("DISCORD_CHANNEL_ID", cast=int, default=0)
+    DISCORD_PRIVATE_KEY = config("DISCORD_PRIVATE_KEY", default="")
 
-COINALYZE_SECRET_API_KEY = config("SECRET_API_KEY")
+# SMS
+ENABLE_SMS = config("ENABLE_SMS", default=False, cast=bool)
+if ENABLE_SMS:
+    SMS_API_KEY = config("SMS_API_KEY", default="")
+    SMS_CLIENT = TextClient(apikey=SMS_API_KEY)
+    SMS_TO = config("SMS_TO")
+    SMS_FROM = config("SMS_FROM")
+
+# text to speech
+ENABLE_SPEECH = config("ENABLE_SPEECH", default=True, cast=bool)
+
+# coinalyze
+COINALYZE_SECRET_API_KEY = config("COINALYZE_SECRET_API_KEY")
 COINALYZE_LIQUIDATION_URL = config(
     "LIQUIDATION_URL", default="https://api.coinalyze.net/v1/liquidation-history"
 )
@@ -25,11 +40,11 @@ FUTURE_MARKETS_URL = config(
     "FUTURES_MARKETS_URL", default="https://api.coinalyze.net/v1/future-markets"
 )
 N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
-MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
+MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=1_000_000, cast=int)
 SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=60, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
 TMP_MP3_DIR = config("SPEECH_MP3_DIR", default="/tmp")
-ENABLE_SPEECH = config("ENABLE_SPEECH", default=True, cast=bool)
+
 
 pygame.mixer.init()
 
@@ -38,6 +53,11 @@ def print_there(x: int, y: int, text: str) -> None:
     """Print text at the bottom on the terminal"""
     sys.stdout.write("\x1b7\x1b[%d;%df%s\x1b8" % (x, y, text))
     sys.stdout.flush()
+
+
+def send_sms(message: str) -> None:
+    """Send a message through SMS"""
+    SMS_CLIENT.SendSingleMessage(message=message, from_=SMS_FROM, to=[SMS_TO])
 
 
 def post_to_discord(message: str) -> None:
@@ -148,6 +168,8 @@ class CoinalyzeScanner:
                         title=f"{l_time}-{direction}-{liquidation_amount}",
                         text=liquidation_message,
                     )
+                if ENABLE_SMS:
+                    send_sms(liquidation_message)
                 self.scanned_data.add(liquidation_tuple)
 
         total_long, total_short = 0, 0
@@ -171,7 +193,7 @@ class CoinalyzeScanner:
         try:
             response = requests.get(
                 url,
-                headers={"api_key": SECRET_API_KEY},
+                headers={"api_key": COINALYZE_SECRET_API_KEY},
                 params=self.params if include_params else {},
             )
             response.raise_for_status()
@@ -203,6 +225,7 @@ def main() -> None:
         # print the current time at the bottom of the terminal
         print_there(100, 0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+        # handle liquidations
         scanner.handle_liquidation_set(scanner.handle_url(COINALYZE_LIQUIDATION_URL))
 
         # sleep for preferred interval
