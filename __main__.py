@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timedelta
 import discord
 import os
@@ -15,29 +14,22 @@ from typing import List
 
 
 ENABLE_DISCORD = config("ENABLE_DISCORD", default=False, cast=bool)
-DISCORD_CHANNEL = config("PANEL_CHANNEL_ID", cast=int, default=0)
-DISCORD_PRIVATE_KEY = config("TOKEN", default="")
+DISCORD_CHANNEL_ID = config("DISCORD_CHANNEL_ID", cast=int, default=0)
+DISCORD_PRIVATE_KEY = config("DISCORD_PRIVATE_KEY", default="")
 
 COINALYZE_SECRET_API_KEY = config("SECRET_API_KEY")
 COINALYZE_LIQUIDATION_URL = config(
     "LIQUIDATION_URL", default="https://api.coinalyze.net/v1/liquidation-history"
-)
-COINALYZE_OPEN_INTEREST_URL = config(
-    "OPEN_INTEREST_URL", default="https://api.coinalyze.net/v1/open-interest-history"
 )
 FUTURE_MARKETS_URL = config(
     "FUTURES_MARKETS_URL", default="https://api.coinalyze.net/v1/future-markets"
 )
 N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
 MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
-MINIMAL_OPEN_INTEREST = config("MINIMAL_OPEN_INTEREST", default=10_000_000, cast=int)
-ROUNDED_DIFFERENCE_OPEN_INTEREST = config(
-    "ROUNDED_DIFFERENCE_OPEN_INTEREST", default=-6, cast=int
-)
 SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=60, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
 TMP_MP3_DIR = config("SPEECH_MP3_DIR", default="/tmp")
-
+ENABLE_SPEECH = config("ENABLE_SPEECH", default=True, cast=bool)
 
 pygame.mixer.init()
 
@@ -61,7 +53,7 @@ def post_to_discord(message: str) -> None:
 
     @client.event
     async def on_ready():
-        channel = client.get_channel(DISCORD_CHANNEL)
+        channel = client.get_channel(DISCORD_CHANNEL_ID)
         await channel.send(f"@everyone {message}")
         await client.close()
 
@@ -126,43 +118,6 @@ class CoinalyzeScanner:
         print(f"Lenght of symbols: {len(symbols)}")
         return ",".join(symbols[:20])
 
-    # def handle_open_interest(self, history: dict) -> None:
-    #     """Handle the open interest fluctuations
-
-    #     Args:
-    #         history (dict): history of the open interest
-    #     """
-
-    #     candle_time, candle_open, candle_high, candle_low = (
-    #         history.get("t"),
-    #         history.get("o"),
-    #         history.get("h"),
-    #         history.get("l"),
-    #     )
-    #     difference = abs(int(candle_high) - int(candle_low))
-    #     rounded_difference = round(difference, ROUNDED_DIFFERENCE_OPEN_INTEREST)
-    #     open_interest_tuple = (candle_time, rounded_difference)
-    #     if (
-    #         difference >= MINIMAL_OPEN_INTEREST
-    #         and open_interest_tuple not in self.scanned_data
-    #     ):
-    #         print(
-    #             "Open interest changed:"
-    #             + "\t\t"
-    #             + f"${difference:>9}.-"
-    #             + f"\t at {datetime.fromtimestamp(candle_time)}"
-    #         )
-    #         open_interest_message = (
-    #             f"Change in open interest with value ${difference:,}- detected"
-    #         )
-    #         if ENABLE_DISCORD:
-    #             post_to_discord(open_interest_message)
-    #         convert_speech_to_text(
-    #             title=f"{candle_time}-{candle_open}-{difference}",
-    #             text=open_interest_message,
-    #         )
-    #         self.scanned_data.add(open_interest_tuple)
-
     def handle_liquidation_set(self, symbols: list) -> None:
         """Handle the liquidation set and check for liquidations
 
@@ -188,10 +143,11 @@ class CoinalyzeScanner:
                 liquidation_message = f"{direction} liquidation with value ${liquidation_amount:,}- detected"
                 if ENABLE_DISCORD:
                     post_to_discord(liquidation_message)
-                convert_speech_to_text(
-                    title=f"{l_time}-{direction}-{liquidation_amount}",
-                    text=liquidation_message,
-                )
+                if ENABLE_SPEECH:
+                    convert_speech_to_text(
+                        title=f"{l_time}-{direction}-{liquidation_amount}",
+                        text=liquidation_message,
+                    )
                 self.scanned_data.add(liquidation_tuple)
 
         total_long, total_short = 0, 0
@@ -249,12 +205,6 @@ def main() -> None:
         print_there(100, 0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
         scanner.handle_liquidation_set(scanner.handle_url(COINALYZE_LIQUIDATION_URL))
-
-        # sleep for preferred interval
-        # sleep(SLEEP_INTERVAL)
-
-        # for history in scanner.handle_url(COINALYZE_OPEN_INTEREST_URL):
-        #     scanner.handle_open_interest(history)
 
         # sleep for preferred interval
         sleep(SLEEP_INTERVAL)
