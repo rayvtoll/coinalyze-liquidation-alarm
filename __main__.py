@@ -40,10 +40,11 @@ FUTURE_MARKETS_URL = config(
     "FUTURES_MARKETS_URL", default="https://api.coinalyze.net/v1/future-markets"
 )
 N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
-MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=1_000_000, cast=int)
+MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
 SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=60, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
 TMP_MP3_DIR = config("SPEECH_MP3_DIR", default="/tmp")
+MP3_VOLUME = config("MP3_VOLUME", default=0.6, cast=float)
 
 
 pygame.mixer.init()
@@ -87,13 +88,15 @@ def convert_speech_to_text(title: str, text: str) -> None:
         title (str): title of the speech for the temporary mp3 file
         text (str): text to convert to speech
     """
+    file_path_and_name = f"{TMP_MP3_DIR}/{title}.mp3"
+
     # save speech to an mp3 file
     tts = gTTS(text=text, lang="en", slow=False)
-    tts.save(f"{TMP_MP3_DIR}/{title}.mp3")
+    tts.save(file_path_and_name)
 
     # play the mp3 file
-    pygame.mixer.music.load(f"/tmp/{title}.mp3")
-    pygame.mixer.music.set_volume(0.5)
+    pygame.mixer.music.load(file_path_and_name)
+    pygame.mixer.music.set_volume(MP3_VOLUME)
     pygame.mixer.music.play()
 
     # wait for the mp3 to finish
@@ -104,7 +107,7 @@ def convert_speech_to_text(title: str, text: str) -> None:
     pygame.mixer.music.unload()
 
     # remove the mp3 file
-    os.remove(f"{TMP_MP3_DIR}/{title}.mp3")
+    os.remove(file_path_and_name)
 
 
 class CoinalyzeScanner:
@@ -161,6 +164,8 @@ class CoinalyzeScanner:
                     + f"\t at {datetime.fromtimestamp(l_time)}"
                 )
                 liquidation_message = f"{direction} liquidation with value ${liquidation_amount:,}- detected"
+                if ENABLE_SMS:
+                    send_sms(liquidation_message)
                 if ENABLE_DISCORD:
                     post_to_discord(liquidation_message)
                 if ENABLE_SPEECH:
@@ -168,8 +173,6 @@ class CoinalyzeScanner:
                         title=f"{l_time}-{direction}-{liquidation_amount}",
                         text=liquidation_message,
                     )
-                if ENABLE_SMS:
-                    send_sms(liquidation_message)
                 self.scanned_data.add(liquidation_tuple)
 
         total_long, total_short = 0, 0
