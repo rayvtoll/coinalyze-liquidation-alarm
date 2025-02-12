@@ -41,7 +41,6 @@ FUTURE_MARKETS_URL = config(
 )
 N_MINUTES_TIMEDELTA = config("N_MINUTES_TIMEDELTA", default=6, cast=int)
 MINIMAL_LIQUIDATION = config("MINIMAL_LIQUIDATION", default=10_000, cast=int)
-SLEEP_INTERVAL = config("SLEEP_INTERVAL", default=60, cast=int)
 INTERVAL = config("INTERVAL", default="5min")
 TMP_MP3_DIR = config("SPEECH_MP3_DIR", default="/tmp")
 MP3_VOLUME = config("MP3_VOLUME", default=0.6, cast=float)
@@ -78,7 +77,7 @@ def post_to_discord(message: str) -> None:
         await channel.send(f"@everyone {message}")
         await client.close()
 
-    client.run(token=DISCORD_PRIVATE_KEY)
+    client.run(token=DISCORD_PRIVATE_KEY, log_handler=None)
 
 
 def convert_speech_to_text(title: str, text: str) -> None:
@@ -114,8 +113,8 @@ class CoinalyzeScanner:
     """Scans coinalyze to notify for changes in open interest and liquidations through
     text to speech"""
 
-    def __init__(self):
-        self.scanned_data = set()
+    def __init__(self, now: datetime) -> None:
+        self.now = now
 
     @property
     def params(self) -> dict:
@@ -123,11 +122,9 @@ class CoinalyzeScanner:
         return {
             "symbols": self.symbols,
             "from": int(
-                datetime.timestamp(
-                    datetime.now() - timedelta(minutes=N_MINUTES_TIMEDELTA)
-                )
+                datetime.timestamp(self.now - timedelta(minutes=N_MINUTES_TIMEDELTA))
             ),
-            "to": int(datetime.timestamp(datetime.now())),
+            "to": int(datetime.timestamp(self.now)),
             "interval": INTERVAL,
         }
 
@@ -148,32 +145,32 @@ class CoinalyzeScanner:
             history (dict): history of the liquidation
         """
 
-        def _handle_liquidation(liquidation_amount: int, direction: str):
+        def _handle_liquidation(liquidation_amount: int, direction: str, l_time: int):
             """Internal function to handle the liquidation
 
             Args:
                 liquidation_amount (int): amount of the liquidation
                 direction (str): direction of the liquidation
             """
-            liquidation_tuple = l_time, direction, liquidation_amount
-            if liquidation_tuple not in self.scanned_data:
-                print(
-                    "Liquidation detected:"
-                    + f"\t{direction}\t"
-                    + f"${liquidation_amount:>9}.-"
-                    + f"\t at {datetime.fromtimestamp(l_time)}"
+
+            print(
+                "Liquidation detected:"
+                + f"\t{direction}\t"
+                + f"${liquidation_amount:>9}.-"
+                + f"\t at {datetime.fromtimestamp(l_time)}"
+            )
+            liquidation_message = (
+                f"{direction} liquidation with value ${liquidation_amount:,}- detected"
+            )
+            if ENABLE_SMS:
+                send_sms(liquidation_message)
+            if ENABLE_DISCORD:
+                post_to_discord(liquidation_message)
+            if ENABLE_SPEECH:
+                convert_speech_to_text(
+                    title=f"{l_time}-{direction}-{liquidation_amount}",
+                    text=liquidation_message,
                 )
-                liquidation_message = f"{direction} liquidation with value ${liquidation_amount:,}- detected"
-                if ENABLE_SMS:
-                    send_sms(liquidation_message)
-                if ENABLE_DISCORD:
-                    post_to_discord(liquidation_message)
-                if ENABLE_SPEECH:
-                    convert_speech_to_text(
-                        title=f"{l_time}-{direction}-{liquidation_amount}",
-                        text=liquidation_message,
-                    )
-                self.scanned_data.add(liquidation_tuple)
 
         total_long, total_short = 0, 0
         l_time = symbols[0].get("t") if len(symbols) else 0
@@ -181,9 +178,9 @@ class CoinalyzeScanner:
             total_long += round(history.get("l"), 0)
             total_short += round(history.get("s"), 0)
         if total_long > MINIMAL_LIQUIDATION:
-            _handle_liquidation(total_long, "long")
+            _handle_liquidation(total_long, "long", l_time)
         if total_short > MINIMAL_LIQUIDATION:
-            _handle_liquidation(total_short, "short")
+            _handle_liquidation(total_short, "short", l_time)
 
     def handle_url(
         self, url: str, include_params: bool = True, symbols: bool = False
@@ -219,20 +216,32 @@ class CoinalyzeScanner:
 
 
 def main() -> None:
+    scanner = CoinalyzeScanner(datetime.now())
+    
+    # clear the terminal
+    os.system('clear')
+    
+    # print some stuff
     print("Starting the Coinalyze scanner")
-
-    scanner = CoinalyzeScanner()
+    print()
+    print("BTC markets that will be scanned:", ", ".join(scanner.symbols.split(",")))
 
     while True:
-
+        now = datetime.now()
+        
         # print the current time at the bottom of the terminal
-        print_there(100, 0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        print_there(100, 0, now.ctime())
+        
+        if now.minute % 5 == 0 and now.second == 0:
+            scanner.now = now
 
-        # handle liquidations
-        scanner.handle_liquidation_set(scanner.handle_url(COINALYZE_LIQUIDATION_URL))
+            # handle liquidations
+            scanner.handle_liquidation_set(
+                scanner.handle_url(COINALYZE_LIQUIDATION_URL)
+            )
 
-        # sleep for preferred interval
-        sleep(SLEEP_INTERVAL)
+        # sleep some just in case
+        sleep(0.99)
 
 
 if __name__ == "__main__":
